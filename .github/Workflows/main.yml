@@ -1,45 +1,27 @@
-name: Install AnyDesk
+name: AnyDesk - Install and Show ID
 
 on:
   workflow_dispatch:
 
 jobs:
-  install-anydesk:
+  anydesk:
+    # لازم يكون Windows self-hosted runner على جهازك
     runs-on: [self-hosted, Windows]
 
     steps:
-      - name: Download AnyDesk
+      - name: Check Windows
         shell: powershell
         run: |
-          $url = "https://download.anydesk.com/AnyDesk.exe"
-          $file = "$env:TEMP\AnyDesk.exe"
+          Write-Host "Windows runner detected."
+          Write-Host "Computer: $env:COMPUTERNAME"
 
-          Invoke-WebRequest -Uri $url -OutFile $file
-
-          if (-not (Test-Path $file)) {
-              throw "AnyDesk download failed."
-          }
-
-          Write-Host "Downloaded AnyDesk."
-
-      - name: Install AnyDesk
-        shell: powershell
-        run: |
-          $file = "$env:TEMP\AnyDesk.exe"
-
-          Start-Process `
-            -FilePath $file `
-            -ArgumentList "--install", "`"$env:ProgramFiles(x86)\AnyDesk`"", "--start-with-win" `
-            -Wait
-
-          Remove-Item $file -Force -ErrorAction SilentlyContinue
-
-      - name: Start AnyDesk and Show ID
+      - name: Find AnyDesk
+        id: find
         shell: powershell
         run: |
           $paths = @(
-            "$env:ProgramFiles(x86)\AnyDesk\AnyDesk.exe",
-            "$env:ProgramFiles\AnyDesk\AnyDesk.exe"
+            "C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
+            "C:\Program Files\AnyDesk\AnyDesk.exe"
           )
 
           $anydesk = $paths |
@@ -47,17 +29,53 @@ jobs:
             Select-Object -First 1
 
           if (-not $anydesk) {
-              throw "AnyDesk.exe was not found."
+            Write-Host "AnyDesk is not installed."
+            "installed=false" >> $env:GITHUB_OUTPUT
+            exit 0
           }
 
-          Start-Process $anydesk
+          Write-Host "AnyDesk found:"
+          Write-Host $anydesk
+
+          "installed=true" >> $env:GITHUB_OUTPUT
+          "path=$anydesk" >> $env:GITHUB_OUTPUT
+
+      - name: Start AnyDesk
+        if: steps.find.outputs.installed == 'true'
+        shell: powershell
+        run: |
+          $anydesk = "${{ steps.find.outputs.path }}"
+
+          Start-Process -FilePath $anydesk
+
           Start-Sleep -Seconds 5
+
+          Write-Host "AnyDesk started."
+
+      - name: Get AnyDesk ID
+        if: steps.find.outputs.installed == 'true'
+        shell: powershell
+        run: |
+          $anydesk = "${{ steps.find.outputs.path }}"
 
           $id = (& $anydesk --get-id 2>$null | Out-String).Trim()
 
+          if ([string]::IsNullOrWhiteSpace($id)) {
+            Write-Error "Could not read the AnyDesk ID."
+            exit 1
+          }
+
           Write-Host ""
-          Write-Host "=============================="
-          Write-Host "       AnyDesk ID"
-          Write-Host "=============================="
+          Write-Host "================================"
+          Write-Host "          AnyDesk ID"
+          Write-Host "================================"
           Write-Host $id
-          Write-Host "=============================="
+          Write-Host "================================"
+
+      - name: AnyDesk Not Installed
+        if: steps.find.outputs.installed != 'true'
+        shell: powershell
+        run: |
+          Write-Host "AnyDesk was not found on this Windows machine."
+          Write-Host "Install AnyDesk normally, then run this workflow again."
+          exit 1
